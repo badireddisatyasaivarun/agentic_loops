@@ -1,24 +1,28 @@
 import requests
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-def already_watched_anime(anime_title):
-    anime_data = {
-        "Attack on Titan": {
-            "rating": 9.0
-        },
-        "Demon Slayer": {
-            "rating": 8.7
-        },
-        "Death Note": {
-            "rating": 8.9
-        },
-        "Noragami": {
-            "rating": 7
-        },
-        "Jujutsu Kaisen":{
-            "rating": 9
-        },
-    }
-    return anime_data.get(anime_title)
+app = FastAPI()
+
+# def already_watched_anime(anime_title):
+#     anime_data = {
+#         "Attack on Titan": {
+#             "rating": 9.0
+#         },
+#         "Demon Slayer": {
+#             "rating": 8.7
+#         },
+#         "Death Note": {
+#             "rating": 8.9
+#         },
+#         "Noragami": {
+#             "rating": 7
+#         },
+#         "Jujutsu Kaisen":{
+#             "rating": 9
+#         },
+#     }
+#     return anime_data.get(anime_title)
 
 def live_anime_data(anime_title):
 
@@ -95,121 +99,108 @@ def ask_llm(prompt):
 
     return response.json()["response"]
 
-anime_similar_to = 'Attack on Titan'
-genre_preferred = 'Action'
-rating = 8
 
-state = {
-    "user_request" : f"""I want a single anime similar to {anime_similar_to}, I prefer {genre_preferred} oriented, with rating over {rating}""",
-    "observations":[],
-    "iteration": 0,
-}
+def animeRecommendationService(req_obj):
 
-def call_llm_with_prompt(state):
-    llm_prompt = f"""
-    You are an anime recommendation agent.
+    anime_similar_to = req_obj.anime_similar_to
+    genre_preferred = ", ".join(req_obj.genre_preferred) 
+    rating = req_obj.min_rating
 
-    Current state:
-    {state}
+    state = {
+        "user_request" : f"""I want a single anime similar to {anime_similar_to}, I prefer {genre_preferred} oriented, with rating over {rating}""",
+        "observations":[],
+        "iteration": 0,
+    }
 
-    User request:
-    {state["user_request"]}
+    def call_llm_with_prompt(state):
+        llm_prompt = f"""
+        You are an anime recommendation agent.
 
-    Rules:
+        Current state:
+        {state}
 
-    1. Do NOT recommend the same anime mentioned in the user request.
-    2. Do NOT search an anime that exists twice in observations.
-    3. Search only ONE concrete anime title.
-    4. Never output explanations.
-    5. Check previous observations first.
-    6. Two anime are considered similar if the similarity score is greater than 70%.
-    Similarity weights:
-    Genre: 40%
-    Themes: 30%
-    Tone: 20%
-    Setting: 10%
-    7. If an anime in observations satisfies:
-    - similarity > 70%
-    - {genre_preferred} oriented
-    - anime rating must be greater than {rating}
-    - NOT already be watched before
-    then return exactly:
-    FINISH: <anime title>
-    Do not include explanations, reasoning, sentences, or additional text.
-    
-    8. If no observed anime satisfies all requirements, return exactly:
-    SEARCH: <anime title>
-    Do not include explanations, reasoning, sentences, or additional text.
-    
-    9. If it succeed return your output
-    You have one tool:
-    live_anime_data(title)
+        User request:
+        {state["user_request"]}
 
-    Return exactly one line.
-    Return only SEARCH or FINISH.
-    """
+        Rules:
 
+        1. Do NOT recommend the same anime mentioned in the user request.
+        2. Do NOT search an anime that exists twice in observations.
+        3. Search only ONE concrete anime title.
+        4. Never output explanations.
+        5. Check previous observations first.
+        6. Two anime are considered similar if the similarity score is greater than 70%.
+        Similarity weights:
+        Genre: 40%
+        Story/Synopsis: 60%
+        7. If an anime in observations satisfies:
+        - similarity > 70%
+        - {genre_preferred} oriented
+        - anime rating must be greater than {rating}
 
-    return ask_llm(llm_prompt)
+        then return exactly:
+        FINISH: <anime title>
+        Do not include explanations, reasoning, sentences, or additional text.
+        
+        8. If no observed anime satisfies all requirements, return exactly:
+        SEARCH: <anime title>
+        Do not include explanations, reasoning, sentences, or additional text.
+        
+        9. If it succeed return your output
+        You have one tool:
+        live_anime_data(title)
+
+        Return exactly one line.
+        Return only SEARCH or FINISH.
+        """
 
 
-max_loop_cycles = 5
-finished = False
-while(max_loop_cycles > 0):
-    curr_res = call_llm_with_prompt(state)
-    if curr_res.startswith("SEARCH:"):
-        anime_title = curr_res.replace("SEARCH:", "").strip()
-        curr_anime_data = live_anime_data(anime_title)
-        state["observations"].append({
-            "llm_observation": curr_res,
-            "tool_result": curr_anime_data
-        })
+        return ask_llm(llm_prompt)
+
+
+    max_loop_cycles = 5
+    while(max_loop_cycles > 0):
         state["iteration"] += 1
-        # print("Iteration: ", state["iteration"], " ", state)
-    else :
-        state["observations"].append({
-            "llm_observation": curr_res,
-            "tool_result": None
-        })
-        # print("state:", state)
-        print("Final State: ", curr_res.replace("FINISH:", "").strip())
-        finished = True
-        break
-    max_loop_cycles -= 1
+        curr_res = call_llm_with_prompt(state).strip()
+        if curr_res.startswith("SEARCH:"):
+            anime_title = curr_res.replace("SEARCH:", "").strip()
+            curr_anime_data = live_anime_data(anime_title)
+            state["observations"].append({
+                "llm_observation": curr_res,
+                "tool_result": curr_anime_data
+            })
+            print("Iteration: ", state["iteration"], " ", state)
+        elif curr_res.startswith("FINISH:"):
+            state["observations"].append({
+                "llm_observation": curr_res,
+                "tool_result": None
+            })
+            print("state:", state)
+            return {
+                "success": True,
+                "anime": curr_res.replace("FINISH:", "").strip(),
+                "iterations": state["iteration"]
+            }
+        else :
+            return {
+                'error': 'Failure in Recommending Anime'
+            }
+        max_loop_cycles -= 1
 
-if(finished == False):
-    print("Max Iterations Reached")
+    return {
+        "success": False,
+        "error": "Maximum iterations reached"
+    }
 
 
 
 
-    
-# if result1.startswith("SEARCH:"):
+class RecommendationRequest(BaseModel):
+    anime_similar_to: str
+    genre_preferred: list[str]
+    min_rating: float
 
-#     anime_title = result1.replace("SEARCH:", "").strip()
-#     tool_result = test_anime(anime_title)
 
-#     second_prompt = f"""
-#         GOAL: 
-#             1. the anime should be of Action oriented
-#             2. It should not have more than 24 episodes
-#             3. rating should be more than 8
-#             4. it should not be in my rating list
-#         User wants:
-#         {user_request1}
-
-#         You searched for:
-#         {anime_title}
-
-#         Tool returned:
-#         {tool_result}
-
-#         Based on this information, recommend another anime.
-#         """
-
-#     answer = ask_llm(second_prompt)
-#     print("Second Prompt:", answer)
-# else: 
-#     print(result1.replace("Finish:", "").strip())
-
-# # print(test_anime('Attack on Titan'))
+@app.post("/recommend")
+def recommend(request: RecommendationRequest):
+    return animeRecommendationService(request)
