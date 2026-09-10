@@ -43,9 +43,12 @@ def ask_llm(prompt):
 
     return response.json()["response"]
 
+anime_similar_to = 'Attack on Titan'
+genre_preferred = 'Action'
+rating = 8
 
 state = {
-    "user_request" : "I want a single anime similar to Attack on Titan, I prefer action oriented, with rating over 8",
+    "user_request" : f"""I want a single anime similar to {anime_similar_to}, I prefer {genre_preferred} oriented, with rating over {rating}""",
     "observations":[],
     "iteration": 0,
 }
@@ -54,45 +57,51 @@ def call_llm_with_prompt(state):
     llm_prompt = f"""
     You are an anime recommendation agent.
 
-
-    User state: 
-        consists of user_request which is the goal you need to satissfy
-        consists of observations that have been results obtained by previous model as well as information provided by external tool.
-        consists of iteration the number of times looping was done
-
     Current state:
     {state}
 
-    Do not consider same anime as specified by user
-    Once a anime is observed, do not produce it again
-    Give anime recommendation based on concrete title
-    two anime are consider similar if the percentage is > 70% with weights
-        Genre       40%
-        Themes      30%
-        Tone        20%
-        Setting     10%
+    User request:
+    {state["user_request"]}
 
-    You have one tool: it gives information available on the internet
+    Rules:
 
+    1. Do NOT recommend the same anime mentioned in the user request.
+    2. Do NOT search an anime that already exists in observations.
+    3. Search only ONE concrete anime title.
+    4. Never output explanations.
+    5. Check previous observations first.
+    6. Two anime are considered similar if the similarity score is greater than 70%.
+    Similarity weights:
+    Genre: 40%
+    Themes: 30%
+    Tone: 20%
+    Setting: 10%
+    7. If an anime in observations satisfies:
+    - similarity > 70%
+    - {genre_preferred} oriented
+    - anime rating must be greater than {rating}
+    then return exactly:
+    FINISH: <anime title>
+    Do not include explanations, reasoning, sentences, or additional text.
+    
+    8. If no observed anime satisfies all requirements, return exactly:
+    SEARCH: <anime title>
+    Do not include explanations, reasoning, sentences, or additional text.
+    
+    9. If it succeed return your output
+    You have one tool:
     live_anime_data(title)
 
-    If you need additional information about an anime, respond exactly:
-
-    SEARCH: anime title
-
-    If you already have enough information, check for all conditions that user requested to be sattisfied, if yes return:
-
-    FINISH: your answer
-
-    or else return SEARCH: anime title
-
+    Return exactly one line.
     Return only SEARCH or FINISH.
     """
+
 
     return ask_llm(llm_prompt)
 
 
 max_loop_cycles = 5
+finished = False
 while(max_loop_cycles > 0):
     curr_res = call_llm_with_prompt(state)
     if curr_res.startswith("SEARCH:"):
@@ -105,12 +114,18 @@ while(max_loop_cycles > 0):
         state["iteration"] += 1
         print("Iteration: ", state["iteration"], " ", state)
     else :
-        # print("state:", state)
+        state["observations"].append({
+            "llm_observation": curr_res,
+            "tool_result": None
+        })
+        print("state:", state)
         print("Final State: ", curr_res.replace("FINISH:", "").strip())
+        finished = True
         break
     max_loop_cycles -= 1
 
-
+if(finished == False):
+    print("Max Iterations Reached")
 
 
 
