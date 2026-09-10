@@ -1,4 +1,6 @@
 import requests
+from groq import Groq
+import os
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -87,18 +89,40 @@ def live_anime_data(anime_title):
         return None
 
 # calling Ollama with a defined prompt
+# def ask_llm(prompt):
+#     response = requests.post(
+#         "http://localhost:11434/api/generate",
+#         json={
+#             "model": "llama3.2:3b",
+#             "prompt": prompt,
+#             "stream": False
+#         }
+#     )
+
+#     return response.json()["response"]
+
+
+
+# use groq
+client = Groq(
+    api_key=os.environ.get("GROQ_API_KEY")
+)
 def ask_llm(prompt):
-    response = requests.post(
-        "http://localhost:11434/api/generate",
-        json={
-            "model": "llama3.2:3b",
-            "prompt": prompt,
-            "stream": False
-        }
+    completion = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0.2,
+        max_completion_tokens=2048,
+        reasoning_effort="medium",
+        stream=False
     )
 
-    return response.json()["response"]
-
+    return completion.choices[0].message.content
 
 def animeRecommendationService(req_obj):
 
@@ -129,14 +153,14 @@ def animeRecommendationService(req_obj):
         3. Search only ONE concrete anime title.
         4. Never output explanations.
         5. Check previous observations first.
+        6. Each observation contains is_valid_anime. If is_valid_anime is False, do NOT consider that anime as a final recommendation.
         6. Two anime are considered similar if the similarity score is greater than 70%.
         Similarity weights:
         Genre: 40%
         Story/Synopsis: 60%
         7. If an anime in observations satisfies:
+        - is_valid_anime is True
         - similarity > 70%
-        - {genre_preferred} oriented
-        - anime rating must be greater than {rating}
 
         then return exactly:
         FINISH: <anime title>
@@ -145,8 +169,7 @@ def animeRecommendationService(req_obj):
         8. If no observed anime satisfies all requirements, return exactly:
         SEARCH: <anime title>
         Do not include explanations, reasoning, sentences, or additional text.
-        
-        9. If it succeed return your output
+      
         You have one tool:
         live_anime_data(title)
 
@@ -165,15 +188,27 @@ def animeRecommendationService(req_obj):
         if curr_res.startswith("SEARCH:"):
             anime_title = curr_res.replace("SEARCH:", "").strip()
             curr_anime_data = live_anime_data(anime_title)
+            is_valid_anime = False
+            is_atleast_one_genre_match = False
+            if(curr_anime_data and curr_anime_data.get("genre") is not None):
+                preferred_genres = {gr.lower() for gr in req_obj.genre_preferred}
+                anime_genres = {gr.lower() for gr in curr_anime_data.get("genre", [])}
+                is_atleast_one_genre_match = bool(preferred_genres & anime_genres)
+            
+            if (curr_anime_data and curr_anime_data.get("rating") is not None and curr_anime_data["rating"] > rating and is_atleast_one_genre_match):
+                is_valid_anime = True
+            
             state["observations"].append({
                 "llm_observation": curr_res,
-                "tool_result": curr_anime_data
+                "tool_result": curr_anime_data,
+                "is_valid_anime": is_valid_anime
             })
             print("Iteration: ", state["iteration"], " ", state)
         elif curr_res.startswith("FINISH:"):
             state["observations"].append({
                 "llm_observation": curr_res,
-                "tool_result": None
+                "tool_result": None,
+                "is_valid_anime": None,
             })
             print("state:", state)
             return {
