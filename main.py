@@ -1,34 +1,86 @@
 import requests
 
-def live_anime_data(anime_title):
+def already_watched_anime(anime_title):
     anime_data = {
         "Attack on Titan": {
-            "genre": ["Action", "Drama", "Fantasy"],
-            "episodes": 25,
             "rating": 9.0
         },
         "Demon Slayer": {
-            "genre": ["Action", "Fantasy"],
-            "episodes": 26,
             "rating": 8.7
         },
         "Death Note": {
-            "genre": ["Thriller", "Mystery"],
-            "episodes": 37,
             "rating": 8.9
         },
         "Noragami": {
-            "genre": ["Action", "Romance"],
-            "episodes": 24,
             "rating": 7
         },
         "Jujutsu Kaisen":{
-            "genre": ["Action", "Romance"],
-            "episodes": 24,
             "rating": 9
         },
     }
     return anime_data.get(anime_title)
+
+def live_anime_data(anime_title):
+
+    url = "https://kitsu.io/api/edge/anime"
+    params = {
+        "filter[text]": anime_title,
+        "include": "categories",
+        "page[limit]": 1
+    }
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            timeout=10
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not result.get("data"):
+            return None
+
+        anime = result["data"][0]
+        attributes = anime["attributes"]
+        category_map = {}
+        for category in result.get("included", []):
+            if category.get("type") == "categories":
+                category_id = category.get("id")
+                category_name = (
+                    category
+                    .get("attributes", {})
+                    .get("title")
+                )
+                if category_id and category_name:
+                    category_map[category_id] = category_name
+        genres = []
+        relationships = anime.get("relationships", {})
+        category_relationships = (
+            relationships
+            .get("categories", {})
+            .get("data", [])
+        )
+
+        for category in category_relationships:
+            category_id = category.get("id")
+            if category_id in category_map:
+                genres.append(category_map[category_id])
+
+        rating = attributes.get("averageRating")
+        if rating:
+            rating = float(rating) / 10
+
+        return {
+            "title": attributes.get("canonicalTitle"),
+            "genre": genres,
+            "episodes": attributes.get("episodeCount"),
+            "rating": rating,
+            "synopsis": attributes.get("synopsis"),
+            "status": attributes.get("status")
+        }
+
+    except requests.RequestException as error:
+        print("Kitsu API error:", error)
+        return None
 
 # calling Ollama with a defined prompt
 def ask_llm(prompt):
@@ -66,7 +118,7 @@ def call_llm_with_prompt(state):
     Rules:
 
     1. Do NOT recommend the same anime mentioned in the user request.
-    2. Do NOT search an anime that already exists in observations.
+    2. Do NOT search an anime that exists twice in observations.
     3. Search only ONE concrete anime title.
     4. Never output explanations.
     5. Check previous observations first.
@@ -80,6 +132,7 @@ def call_llm_with_prompt(state):
     - similarity > 70%
     - {genre_preferred} oriented
     - anime rating must be greater than {rating}
+    - NOT already be watched before
     then return exactly:
     FINISH: <anime title>
     Do not include explanations, reasoning, sentences, or additional text.
@@ -112,13 +165,13 @@ while(max_loop_cycles > 0):
             "tool_result": curr_anime_data
         })
         state["iteration"] += 1
-        print("Iteration: ", state["iteration"], " ", state)
+        # print("Iteration: ", state["iteration"], " ", state)
     else :
         state["observations"].append({
             "llm_observation": curr_res,
             "tool_result": None
         })
-        print("state:", state)
+        # print("state:", state)
         print("Final State: ", curr_res.replace("FINISH:", "").strip())
         finished = True
         break
