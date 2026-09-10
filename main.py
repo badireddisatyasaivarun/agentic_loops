@@ -1,6 +1,6 @@
 import requests
 
-def test_anime(anime_title):
+def live_anime_data(anime_title):
     anime_data = {
         "Attack on Titan": {
             "genre": ["Action", "Drama", "Fantasy"],
@@ -44,65 +44,104 @@ def ask_llm(prompt):
     return response.json()["response"]
 
 
-def call_llm_with_prompt(user_request):
-    anime_prompt = f"""
+state = {
+    "user_request" : "I want a single anime similar to Attack on Titan, I prefer action oriented, with rating over 8",
+    "observations":[],
+    "iteration": 0,
+}
+
+def call_llm_with_prompt(state):
+    llm_prompt = f"""
     You are an anime recommendation agent.
-    GOAL: 
-        1. the anime should be of Action oriented
-        2. It should not have more than 24 episodes
-        3. rating should be more than 8
-        4. it should not be in my rating list
 
-    User request:
-    {user_request}
 
-    You have one tool:
+    User state: 
+        consists of user_request which is the goal you need to satissfy
+        consists of observations that have been results obtained by previous model as well as information provided by external tool.
+        consists of iteration the number of times looping was done
 
-    test_anime(title)
+    Current state:
+    {state}
 
-    If you need information about an anime, respond exactly:
+    Do not consider same anime as specified by user
+    Once a anime is observed, do not produce it again
+    Give anime recommendation based on concrete title
+    two anime are consider similar if the percentage is > 70% with weights
+        Genre       40%
+        Themes      30%
+        Tone        20%
+        Setting     10%
+
+    You have one tool: it gives information available on the internet
+
+    live_anime_data(title)
+
+    If you need additional information about an anime, respond exactly:
 
     SEARCH: anime title
 
-    If you already have enough information, check for all conditions to be sattisfied, if yes return:
+    If you already have enough information, check for all conditions that user requested to be sattisfied, if yes return:
 
     FINISH: your answer
 
     or else return SEARCH: anime title
+
+    Return only SEARCH or FINISH.
     """
 
-    return ask_llm(anime_prompt)
+    return ask_llm(llm_prompt)
 
 
-user_request1 = "I want an anime similar to Attack on Titan"
+max_loop_cycles = 5
+while(max_loop_cycles > 0):
+    curr_res = call_llm_with_prompt(state)
+    if curr_res.startswith("SEARCH:"):
+        anime_title = curr_res.replace("SEARCH:", "").strip()
+        curr_anime_data = live_anime_data(anime_title)
+        state["observations"].append({
+            "llm_observation": curr_res,
+            "tool_result": curr_anime_data
+        })
+        state["iteration"] += 1
+        print("Iteration: ", state["iteration"], " ", state)
+    else :
+        # print("state:", state)
+        print("Final State: ", curr_res.replace("FINISH:", "").strip())
+        break
+    max_loop_cycles -= 1
 
-result1 = call_llm_with_prompt(user_request1)
-if result1.startswith("SEARCH:"):
 
-    anime_title = result1.replace("SEARCH:", "").strip()
-    tool_result = test_anime(anime_title)
 
-    second_prompt = f"""
-        GOAL: 
-            1. the anime should be of Action oriented
-            2. It should not have more than 24 episodes
-            3. rating should be more than 8
-            4. it should not be in my rating list
-        User wants:
-        {user_request1}
 
-        You searched for:
-        {anime_title}
 
-        Tool returned:
-        {tool_result}
 
-        Based on this information, recommend another anime.
-        """
+    
+# if result1.startswith("SEARCH:"):
 
-    answer = ask_llm(second_prompt)
-    print("Second Prompt:", answer)
-else: 
-    print(result1.replace("Finish:", "").strip())
+#     anime_title = result1.replace("SEARCH:", "").strip()
+#     tool_result = test_anime(anime_title)
 
-# print(test_anime('Attack on Titan'))
+#     second_prompt = f"""
+#         GOAL: 
+#             1. the anime should be of Action oriented
+#             2. It should not have more than 24 episodes
+#             3. rating should be more than 8
+#             4. it should not be in my rating list
+#         User wants:
+#         {user_request1}
+
+#         You searched for:
+#         {anime_title}
+
+#         Tool returned:
+#         {tool_result}
+
+#         Based on this information, recommend another anime.
+#         """
+
+#     answer = ask_llm(second_prompt)
+#     print("Second Prompt:", answer)
+# else: 
+#     print(result1.replace("Finish:", "").strip())
+
+# # print(test_anime('Attack on Titan'))
