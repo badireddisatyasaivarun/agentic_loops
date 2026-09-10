@@ -183,7 +183,8 @@ def animeRecommendationService(req_obj):
             }
         else :
             return {
-                'error': 'Failure in Recommending Anime'
+                "success": False,
+                "error": "Failure in Recommending Anime"
             }
         max_loop_cycles -= 1
 
