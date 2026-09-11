@@ -1,80 +1,89 @@
-import requests
-from groq import Groq
+import logging
 import os
-from fastapi import FastAPI
-from pydantic import BaseModel
-from fastapi import HTTPException
+from typing import Optional
 
-app = FastAPI()
+import requests
+from fastapi import FastAPI, HTTPException
+from groq import Groq
+from pydantic import BaseModel, Field, field_validator
 
-# def already_watched_anime(anime_title):
-#     anime_data = {
-#         "Attack on Titan": {
-#             "rating": 9.0
-#         },
-#         "Demon Slayer": {
-#             "rating": 8.7
-#         },
-#         "Death Note": {
-#             "rating": 8.9
-#         },
-#         "Noragami": {
-#             "rating": 7
-#         },
-#         "Jujutsu Kaisen":{
-#             "rating": 9
-#         },
-#     }
-#     return anime_data.get(anime_title)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("anime_recommender")
 
-def live_anime_data(anime_title):
+app = FastAPI(title="Anime Recommendation Service")
 
-    url = "https://kitsu.io/api/edge/anime"
+MAX_LOOP_CYCLES = 5
+KITSU_URL = "https://kitsu.io/api/edge/anime"
+GROQ_MODEL = "openai/gpt-oss-120b"
+
+# ---------------------------------------------------------------------------
+# External clients
+# ---------------------------------------------------------------------------
+
+_groq_client: Optional[Groq] = None
+
+
+def get_groq_client() -> Groq:
+    """Lazily create the Groq client and fail with a clear error if the
+    API key is missing, instead of failing deep inside the SDK at import time."""
+    global _groq_client
+    if _groq_client is None:
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY environment variable is not set. "
+                "Set it before starting the service."
+            )
+        _groq_client = Groq(api_key=api_key)
+    return _groq_client
+
+
+_http_session = requests.Session()
+
+
+# ---------------------------------------------------------------------------
+# Kitsu API
+# ---------------------------------------------------------------------------
+
+def live_anime_data(anime_title: str) -> Optional[dict]:
+    """Look up an anime on Kitsu and return a normalized dict, or None on
+    any failure (not found, network error, malformed response)."""
     params = {
         "filter[text]": anime_title,
         "include": "categories",
-        "page[limit]": 1
+        "page[limit]": 1,
     }
     try:
-        response = requests.get(
-            url,
-            params=params,
-            timeout=10
-        )
+        response = _http_session.get(KITSU_URL, params=params, timeout=10)
         response.raise_for_status()
         result = response.json()
-        if not result.get("data"):
+
+        data = result.get("data")
+        if not data:
             return None
 
-        anime = result["data"][0]
-        attributes = anime["attributes"]
-        category_map = {}
-        for category in result.get("included", []):
-            if category.get("type") == "categories":
-                category_id = category.get("id")
-                category_name = (
-                    category
-                    .get("attributes", {})
-                    .get("title")
-                )
-                if category_id and category_name:
-                    category_map[category_id] = category_name
-        genres = []
-        relationships = anime.get("relationships", {})
-        category_relationships = (
-            relationships
+        anime = data[0]
+        attributes = anime.get("attributes", {})
+
+        category_map = {
+            category["id"]: category.get("attributes", {}).get("title")
+            for category in result.get("included", [])
+            if category.get("type") == "categories" and category.get("id")
+        }
+
+        genre_refs = (
+            anime.get("relationships", {})
             .get("categories", {})
             .get("data", [])
         )
-
-        for category in category_relationships:
-            category_id = category.get("id")
-            if category_id in category_map:
-                genres.append(category_map[category_id])
+        genres = [
+            category_map[ref["id"]]
+            for ref in genre_refs
+            if ref.get("id") in category_map and category_map[ref["id"]]
+        ]
 
         rating = attributes.get("averageRating")
-        if rating:
-            rating = float(rating) / 10
+        rating = float(rating) / 10 if rating is not None else None
 
         return {
             "title": attributes.get("canonicalTitle"),
@@ -82,171 +91,213 @@ def live_anime_data(anime_title):
             "episodes": attributes.get("episodeCount"),
             "rating": rating,
             "synopsis": attributes.get("synopsis"),
-            "status": attributes.get("status")
+            "status": attributes.get("status"),
         }
 
     except requests.RequestException as error:
-        print("Kitsu API error:", error)
+        logger.warning("Kitsu API error for %r: %s", anime_title, error)
+        return None
+    except (KeyError, ValueError, TypeError) as error:
+        logger.warning("Kitsu response parsing error for %r: %s", anime_title, error)
         return None
 
-# calling Ollama with a defined prompt
-# def ask_llm(prompt):
-#     response = requests.post(
-#         "http://localhost:11434/api/generate",
-#         json={
-#             "model": "llama3.2:3b",
-#             "prompt": prompt,
-#             "stream": False
-#         }
-#     )
 
-#     return response.json()["response"]
+# ---------------------------------------------------------------------------
+# LLM call
+# ---------------------------------------------------------------------------
 
-
-
-# use groq
-client = Groq(
-    api_key=os.environ.get("GROQ_API_KEY")
-)
-def ask_llm(prompt):
+def ask_llm(prompt: str) -> Optional[str]:
     try:
+        client = get_groq_client()
         completion = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
             max_completion_tokens=2048,
             reasoning_effort="medium",
-            stream=False
+            stream=False,
         )
-
         return completion.choices[0].message.content
-
     except Exception as error:
-        print("Groq API error:", error)
+        logger.error("Groq API error: %s", error)
         return None
 
-def animeRecommendationService(req_obj):
 
-    anime_similar_to = req_obj.anime_similar_to
-    genre_preferred = ", ".join(req_obj.genre_preferred) 
-    rating = req_obj.min_rating
-
-    state = {
-        "user_request" : f"""I want a single anime similar to {anime_similar_to}, I prefer {genre_preferred} oriented, with rating over {rating}""",
-        "observations":[],
-        "iteration": 0,
-    }
-
-    def call_llm_with_prompt(state):
-        llm_prompt = f"""
-        You are an anime recommendation agent.
-
-        Current state:
-        {state}
-
-        User request:
-        {state["user_request"]}
-
-        Rules:
-
-        1. Do NOT recommend the same anime mentioned in the user request.
-        2. Do NOT search again for an anime that already exists in observations.
-            You MUST still evaluate anime already present in observations to determine whether one satisfies the requirements.
-        3. Search only ONE real, existing anime title.
-            The title MUST refer to an actual anime.
-            Do not invent titles or return names of movies, songs, people, bands, or other non-anime entities.
-            If the title contains a minor spelling or grammatical error with less than a 10% difference from a valid anime title, treat it as the intended anime title.
-        4. Never output explanations.
-        5. Check previous observations first.
-        6. Each observation contains is_valid_anime. If is_valid_anime is False, do NOT consider that anime as a final recommendation.
-        6. Two anime are considered similar if the similarity score is greater than 70%.
-        Similarity weights:
-        Genre: 40%
-        Story/Synopsis: 60%
-        7. If an anime in observations satisfies:
-        - is_valid_anime is True
-        - similarity > 70%
-
-        then return exactly:
-        FINISH: <anime title>
-        Do not include explanations, reasoning, sentences, or additional text.
-        
-        8. If no observed anime satisfies all requirements, return exactly:
-        SEARCH: <anime title>
-        Do not include explanations, reasoning, sentences, or additional text.
-      
-        You have one tool:
-        live_anime_data(title)
-
-        Return exactly one line.
-        Return only SEARCH or FINISH.
-        """
-
-
-        return ask_llm(llm_prompt)
-
-
-    max_loop_cycles = 5
-    while(max_loop_cycles > 0):
-        state["iteration"] += 1
-        curr_res = call_llm_with_prompt(state).strip()
-        if curr_res.startswith("SEARCH:"):
-            anime_title = curr_res.replace("SEARCH:", "").strip()
-            curr_anime_data = live_anime_data(anime_title)
-            is_valid_anime = False
-            is_atleast_one_genre_match = False
-            if(curr_anime_data and curr_anime_data.get("genre") is not None):
-                preferred_genres = {gr.lower() for gr in req_obj.genre_preferred}
-                anime_genres = {gr.lower() for gr in curr_anime_data.get("genre", [])}
-                is_atleast_one_genre_match = bool(preferred_genres & anime_genres)
-            
-            if (curr_anime_data and curr_anime_data.get("rating") is not None and curr_anime_data["rating"] > rating and is_atleast_one_genre_match):
-                is_valid_anime = True
-            
-            state["observations"].append({
-                "llm_observation": curr_res,
-                "tool_result": curr_anime_data,
-                "is_valid_anime": is_valid_anime
-            })
-            print("Iteration: ", state["iteration"], " ", state)
-        elif curr_res.startswith("FINISH:"):
-            state["observations"].append({
-                "llm_observation": curr_res,
-                "tool_result": None,
-                "is_valid_anime": None,
-            })
-            print("state:", state)
-            return {
-                "success": True,
-                "anime": curr_res.replace("FINISH:", "").strip(),
-                "iterations": state["iteration"]
-            }
-        else :
-            raise HTTPException(
-                status_code=500,
-                detail=f"Invalid LLM response: {curr_res}"
-            )
-        max_loop_cycles -= 1
-
-    raise HTTPException(
-        status_code=422,
-        detail="Maximum iterations reached"
-    )
-
-
-
+# ---------------------------------------------------------------------------
+# Recommendation agent
+# ---------------------------------------------------------------------------
 
 class RecommendationRequest(BaseModel):
-    anime_similar_to: str
-    genre_preferred: list[str]
-    min_rating: float
+    anime_similar_to: str = Field(..., min_length=1)
+    genre_preferred: list[str] = Field(..., min_length=1)
+    min_rating: float = Field(..., ge=0, le=10)
+
+    @field_validator("anime_similar_to")
+    @classmethod
+    def strip_title(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("anime_similar_to must not be blank")
+        return v
+
+    @field_validator("genre_preferred")
+    @classmethod
+    def clean_genres(cls, v: list[str]) -> list[str]:
+        cleaned = [g.strip() for g in v if g.strip()]
+        if not cleaned:
+            raise ValueError("genre_preferred must contain at least one genre")
+        return cleaned
 
 
-@app.post("/recommend")
-def recommend(request: RecommendationRequest):
-    return animeRecommendationService(request)
+class RecommendationResponse(BaseModel):
+    success: bool
+    anime: str
+    iterations: int
+
+
+def _format_observations(observations: list[dict]) -> str:
+    """Render observations as compact, readable text instead of a raw dict
+    repr, so the LLM gets clean signal without wasted tokens."""
+    if not observations:
+        return "(none yet)"
+    lines = []
+    for i, obs in enumerate(observations, 1):
+        result = obs["tool_result"]
+        if result is None:
+            lines.append(f"{i}. {obs['llm_observation']} -> no data found")
+        else:
+            lines.append(
+                f"{i}. title={result.get('title')!r}, "
+                f"genre={result.get('genre')}, "
+                f"rating={result.get('rating')}, "
+                f"is_valid_anime={obs['is_valid_anime']}"
+            )
+    return "\n".join(lines)
+
+
+def _build_prompt(user_request: str, observations: list[dict]) -> str:
+    return f"""You are an anime recommendation agent.
+
+    User request:
+    {user_request}
+
+    Observations so far:
+    {_format_observations(observations)}
+
+    Rules:
+    1. Do NOT recommend the anime mentioned in the user request.
+    2. Do NOT search again for a title that already appears in observations.
+    Still evaluate anime already in observations to see if one satisfies the requirements.
+    3. Search only ONE real, existing anime title per turn.
+    The title MUST refer to an actual anime, not a movie, song, person, or band.
+    Do not invent titles. Minor spelling/grammar errors under ~10% difference
+    from a valid title should be treated as that title.
+    4. Never output explanations.
+    5. An observation's is_valid_anime being False means it can never be a final recommendation.
+    6. Two anime are considered similar if similarity > 70%, weighted:
+    genre 40%, story/synopsis 60%.
+    7. If an observation has is_valid_anime True AND similarity > 70%, return exactly:
+    FINISH: <anime title>
+    8. Otherwise return exactly:
+    SEARCH: <anime title>
+
+    Output exactly one line, either SEARCH: ... or FINISH: ..., nothing else.
+    """
+
+
+def _validate_finish(anime_title: str, observations: list[dict]) -> bool:
+    """Guard against the LLM hallucinating a FINISH for a title that was
+    never actually validated against Kitsu data."""
+    target = anime_title.strip().lower()
+    for obs in observations:
+        result = obs.get("tool_result")
+        if (
+            obs.get("is_valid_anime")
+            and result
+            and (result.get("title") or "").strip().lower() == target
+        ):
+            return True
+    return False
+
+
+def anime_recommendation_service(req: RecommendationRequest) -> RecommendationResponse:
+    genre_preferred_str = ", ".join(req.genre_preferred)
+    preferred_genres = {g.lower() for g in req.genre_preferred}
+
+    user_request = (
+        f"I want a single anime similar to {req.anime_similar_to}, "
+        f"I prefer {genre_preferred_str} oriented, with rating over {req.min_rating}"
+    )
+    observations: list[dict] = []
+    searched_titles: dict[str, dict] = {}  # normalized title -> observation
+
+    for iteration in range(1, MAX_LOOP_CYCLES + 1):
+        prompt = _build_prompt(user_request, observations)
+        raw_response = ask_llm(prompt)
+
+        if raw_response is None:
+            raise HTTPException(
+                status_code=502,
+                detail="The recommendation model is currently unavailable. Please try again.",
+            )
+
+        curr_res = raw_response.strip()
+
+        if curr_res.startswith("FINISH:"):
+            anime_title = curr_res.replace("FINISH:", "", 1).strip()
+            if not anime_title or not _validate_finish(anime_title, observations):
+                logger.warning(
+                    "LLM returned FINISH for an unvalidated title: %r", anime_title
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail="The model produced a recommendation that could not be verified.",
+                )
+            logger.info("Recommendation found after %d iteration(s): %s", iteration, anime_title)
+            return RecommendationResponse(success=True, anime=anime_title, iterations=iteration)
+
+        if curr_res.startswith("SEARCH:"):
+            anime_title = curr_res.replace("SEARCH:", "", 1).strip()
+            if not anime_title:
+                raise HTTPException(status_code=502, detail="Invalid empty search title from model")
+
+            normalized = anime_title.lower()
+
+            if normalized in searched_titles:
+                # Enforce the "don't re-search" rule in code rather than trusting the prompt.
+                observations.append(searched_titles[normalized])
+                logger.info("Iteration %d: reused cached search for %r", iteration, anime_title)
+                continue
+
+            curr_anime_data = live_anime_data(anime_title)
+
+            is_atleast_one_genre_match = False
+            if curr_anime_data and curr_anime_data.get("genre"):
+                anime_genres = {g.lower() for g in curr_anime_data["genre"]}
+                is_atleast_one_genre_match = bool(preferred_genres & anime_genres)
+
+            is_valid_anime = bool(
+                curr_anime_data
+                and curr_anime_data.get("rating") is not None
+                and curr_anime_data["rating"] > req.min_rating
+                and is_atleast_one_genre_match
+            )
+
+            observation = {
+                "llm_observation": curr_res,
+                "tool_result": curr_anime_data,
+                "is_valid_anime": is_valid_anime,
+            }
+            observations.append(observation)
+            searched_titles[normalized] = observation
+            logger.info("Iteration %d: searched %r -> valid=%s", iteration, anime_title, is_valid_anime)
+            continue
+
+        raise HTTPException(status_code=502, detail=f"Invalid model response: {curr_res!r}")
+
+    raise HTTPException(status_code=422, detail="Maximum iterations reached without a recommendation")
+
+
+@app.post("/recommend", response_model=RecommendationResponse)
+def recommend(request: RecommendationRequest) -> RecommendationResponse:
+    return anime_recommendation_service(request)
