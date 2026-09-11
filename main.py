@@ -4,6 +4,7 @@ from typing import Optional
 
 import requests
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from pydantic import BaseModel, Field, field_validator
 
@@ -11,6 +12,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("anime_recommender")
 
 app = FastAPI(title="Anime Recommendation Service")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 MAX_LOOP_CYCLES = 5
 KITSU_URL = "https://kitsu.io/api/edge/anime"
@@ -258,7 +267,8 @@ def anime_recommendation_service(req: RecommendationRequest) -> RecommendationRe
 
         if curr_res.startswith("FINISH:"):
             anime_title = curr_res.replace("FINISH:", "", 1).strip()
-            if not anime_title or not _validate_finish(anime_title, observations):
+            matched = _validate_finish(anime_title, observations) if anime_title else None
+            if not matched:
                 logger.warning(
                     "LLM returned FINISH for an unvalidated title: %r", anime_title
                 )
@@ -267,7 +277,15 @@ def anime_recommendation_service(req: RecommendationRequest) -> RecommendationRe
                     detail="The model produced a recommendation that could not be verified.",
                 )
             logger.info("Recommendation found after %d iteration(s): %s", iteration, anime_title)
-            return RecommendationResponse(success=True, anime=anime_title, iterations=iteration)
+            return RecommendationResponse(
+                success=True,
+                anime=matched.get("title") or anime_title,
+                iterations=iteration,
+                image=matched.get("image"),
+                description=matched.get("synopsis"),
+                genre=matched.get("genre") or [],
+                rating=matched.get("rating"),
+            )
 
         if curr_res.startswith("SEARCH:"):
             anime_title = curr_res.replace("SEARCH:", "", 1).strip()
