@@ -490,7 +490,7 @@
     <div class="mark">recommend<span>.</span>anime</div>
     <div class="service-address">
       <label for="apiBase">Service address</label>
-      <input id="apiBase" type="text" value="http://localhost:8000" spellcheck="false">
+      <input id="apiBase" type="text" placeholder="http://localhost:8000" spellcheck="false">
     </div>
   </div>
 
@@ -591,6 +591,9 @@
   const resultBody = document.getElementById('resultBody');
   const scanline = document.getElementById('scanline');
   const apiBaseInput = document.getElementById('apiBase');
+  apiBaseInput.value = (window.location.protocol === 'file:')
+    ? 'http://localhost:8000'
+    : window.location.origin;
 
   function showError(message) {
     errorMsg.textContent = message;
