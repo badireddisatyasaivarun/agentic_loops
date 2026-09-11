@@ -85,6 +85,14 @@ def live_anime_data(anime_title: str) -> Optional[dict]:
         rating = attributes.get("averageRating")
         rating = float(rating) / 10 if rating is not None else None
 
+        poster_image = attributes.get("posterImage") or {}
+        image_url = (
+            poster_image.get("large")
+            or poster_image.get("medium")
+            or poster_image.get("original")
+            or poster_image.get("small")
+        )
+
         return {
             "title": attributes.get("canonicalTitle"),
             "genre": genres,
@@ -92,6 +100,7 @@ def live_anime_data(anime_title: str) -> Optional[dict]:
             "rating": rating,
             "synopsis": attributes.get("synopsis"),
             "status": attributes.get("status"),
+            "image": image_url,
         }
 
     except requests.RequestException as error:
@@ -153,6 +162,10 @@ class RecommendationResponse(BaseModel):
     success: bool
     anime: str
     iterations: int
+    image: Optional[str] = None
+    description: Optional[str] = None
+    genre: list[str] = Field(default_factory=list)
+    rating: Optional[float] = None
 
 
 def _format_observations(observations: list[dict]) -> str:
@@ -205,7 +218,7 @@ def _build_prompt(user_request: str, observations: list[dict]) -> str:
     """
 
 
-def _validate_finish(anime_title: str, observations: list[dict]) -> bool:
+def _validate_finish(anime_title: str, observations: list[dict]) -> Optional[dict]:
     """Guard against the LLM hallucinating a FINISH for a title that was
     never actually validated against Kitsu data."""
     target = anime_title.strip().lower()
@@ -216,8 +229,8 @@ def _validate_finish(anime_title: str, observations: list[dict]) -> bool:
             and result
             and (result.get("title") or "").strip().lower() == target
         ):
-            return True
-    return False
+            return result
+    return None
 
 
 def anime_recommendation_service(req: RecommendationRequest) -> RecommendationResponse:
