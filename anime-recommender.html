@@ -603,10 +603,8 @@
       <div class="result-error">
         <div class="result-error-title">Search failed</div>
         <div class="result-error-message">${escapeHtml(message)}</div>
-        <button type="button" class="try-again" id="tryAgainBtn">Try again</button>
       </div>
     `;
-    document.getElementById('tryAgainBtn').addEventListener('click', searchAgain);
   }
 
   function renderResult(data, similarTo) {
