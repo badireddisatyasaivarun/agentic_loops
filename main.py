@@ -149,6 +149,7 @@ class RecommendationRequest(BaseModel):
     anime_similar_to: str = Field(..., min_length=1)
     genre_preferred: list[str] = Field(..., min_length=1)
     min_rating: float = Field(..., ge=0, le=10)
+    exclude_titles: list[str] = Field(default_factory=list)
 
     @field_validator("anime_similar_to")
     @classmethod
@@ -165,6 +166,11 @@ class RecommendationRequest(BaseModel):
         if not cleaned:
             raise ValueError("genre_preferred must contain at least one genre")
         return cleaned
+
+    @field_validator("exclude_titles")
+    @classmethod
+    def clean_exclude_titles(cls, v: list[str]) -> list[str]:
+        return [t.strip() for t in v if t.strip()]
 
 
 class RecommendationResponse(BaseModel):
@@ -197,17 +203,22 @@ def _format_observations(observations: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(user_request: str, observations: list[dict]) -> str:
+def _build_prompt(user_request: str, observations: list[dict], excluded_titles: list[str]) -> str:
+    excluded_str = ", ".join(excluded_titles) if excluded_titles else "(none)"
     return f"""You are an anime recommendation agent.
 
     User request:
     {user_request}
 
+    Already-recommended anime to avoid (never finish on these, never treat them as valid):
+    {excluded_str}
+
     Observations so far:
     {_format_observations(observations)}
 
     Rules:
-    1. Do NOT recommend the anime mentioned in the user request.
+    1. Do NOT recommend the anime mentioned in the user request or any title in the
+    already-recommended list above.
     2. Do NOT search again for a title that already appears in observations.
     Still evaluate anime already in observations to see if one satisfies the requirements.
     3. Search only ONE real, existing anime title per turn.
@@ -246,6 +257,9 @@ def anime_recommendation_service(req: RecommendationRequest) -> RecommendationRe
     genre_preferred_str = ", ".join(req.genre_preferred)
     preferred_genres = {g.lower() for g in req.genre_preferred}
 
+    excluded_titles = [req.anime_similar_to, *req.exclude_titles]
+    excluded_normalized = {t.lower() for t in excluded_titles}
+
     user_request = (
         f"I want a single anime similar to {req.anime_similar_to}, "
         f"I prefer {genre_preferred_str} oriented, with rating over {req.min_rating}"
@@ -254,7 +268,7 @@ def anime_recommendation_service(req: RecommendationRequest) -> RecommendationRe
     searched_titles: dict[str, dict] = {}  # normalized title -> observation
 
     for iteration in range(1, MAX_LOOP_CYCLES + 1):
-        prompt = _build_prompt(user_request, observations)
+        prompt = _build_prompt(user_request, observations, excluded_titles)
         raw_response = ask_llm(prompt)
 
         if raw_response is None:
@@ -307,8 +321,14 @@ def anime_recommendation_service(req: RecommendationRequest) -> RecommendationRe
                 anime_genres = {g.lower() for g in curr_anime_data["genre"]}
                 is_atleast_one_genre_match = bool(preferred_genres & anime_genres)
 
+            is_excluded = bool(
+                curr_anime_data
+                and (curr_anime_data.get("title") or "").strip().lower() in excluded_normalized
+            )
+
             is_valid_anime = bool(
                 curr_anime_data
+                and not is_excluded
                 and curr_anime_data.get("rating") is not None
                 and curr_anime_data["rating"] > req.min_rating
                 and is_atleast_one_genre_match

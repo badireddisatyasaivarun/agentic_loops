@@ -606,9 +606,7 @@
         <button type="button" class="try-again" id="tryAgainBtn">Try again</button>
       </div>
     `;
-    document.getElementById('tryAgainBtn').addEventListener('click', () => {
-      renderPlaceholder();
-    });
+    document.getElementById('tryAgainBtn').addEventListener('click', searchAgain);
   }
 
   function renderResult(data, similarTo) {
@@ -653,9 +651,7 @@
         </div>
       </div>
     `;
-    document.getElementById('tryAgainBtn').addEventListener('click', () => {
-      renderPlaceholder();
-    });
+    document.getElementById('tryAgainBtn').addEventListener('click', searchAgain);
   }
 
   function escapeHtml(str) {
@@ -670,22 +666,15 @@
     scanline.classList.toggle('active', isLoading);
   }
 
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    clearError();
+  // Titles already shown since the last "Find my anime" click. Grows each
+  // time "Search again" is used, and is cleared whenever a fresh search starts.
+  let sessionExcludeTitles = [];
+  // The query behind the current result, reused by "Search again" so it
+  // repeats the same request rather than reading (possibly edited) form fields.
+  let lastQuery = null;
 
-    const similarTo = document.getElementById('similarTo').value.trim();
-    if (!similarTo) {
-      showError('Enter an anime title to base the recommendation on.');
-      return;
-    }
-    if (selectedGenres.size === 0) {
-      showError('Pick at least one genre.');
-      return;
-    }
-
+  async function performSearch(similarTo, genrePreferred, minRatingVal, excludeTitles) {
     const base = API_BASE.replace(/\/$/, '');
-
     setLoading(true);
 
     try {
@@ -694,8 +683,9 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           anime_similar_to: similarTo,
-          genre_preferred: Array.from(selectedGenres),
-          min_rating: parseFloat(minRating.value)
+          genre_preferred: genrePreferred,
+          min_rating: minRatingVal,
+          exclude_titles: excludeTitles
         })
       });
 
@@ -713,12 +703,43 @@
       }
 
       renderResult(data, similarTo);
+      sessionExcludeTitles = [...excludeTitles, data.anime];
 
     } catch (err) {
       renderResultError(`Can't reach the service at ${base}. Check the address, that the server is running, and that it allows requests from this page (CORS).`);
     } finally {
       setLoading(false);
     }
+  }
+
+  function searchAgain() {
+    if (!lastQuery) return;
+    clearError();
+    performSearch(lastQuery.similarTo, lastQuery.genrePreferred, lastQuery.minRatingVal, sessionExcludeTitles);
+  }
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    clearError();
+
+    const similarTo = document.getElementById('similarTo').value.trim();
+    if (!similarTo) {
+      showError('Enter an anime title to base the recommendation on.');
+      return;
+    }
+    if (selectedGenres.size === 0) {
+      showError('Pick at least one genre.');
+      return;
+    }
+
+    const genrePreferred = Array.from(selectedGenres);
+    const minRatingVal = parseFloat(minRating.value);
+
+    // A fresh top-level search: start the exclude list over.
+    sessionExcludeTitles = [];
+    lastQuery = { similarTo, genrePreferred, minRatingVal };
+
+    performSearch(similarTo, genrePreferred, minRatingVal, sessionExcludeTitles);
   });
 </script>
 
