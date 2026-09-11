@@ -3,6 +3,7 @@ from groq import Groq
 import os
 from fastapi import FastAPI
 from pydantic import BaseModel
+from fastapi import HTTPException
 
 app = FastAPI()
 
@@ -108,21 +109,26 @@ client = Groq(
     api_key=os.environ.get("GROQ_API_KEY")
 )
 def ask_llm(prompt):
-    completion = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.2,
-        max_completion_tokens=2048,
-        reasoning_effort="medium",
-        stream=False
-    )
+    try:
+        completion = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2,
+            max_completion_tokens=2048,
+            reasoning_effort="medium",
+            stream=False
+        )
 
-    return completion.choices[0].message.content
+        return completion.choices[0].message.content
+
+    except Exception as error:
+        print("Groq API error:", error)
+        return None
 
 def animeRecommendationService(req_obj):
 
@@ -149,8 +155,12 @@ def animeRecommendationService(req_obj):
         Rules:
 
         1. Do NOT recommend the same anime mentioned in the user request.
-        2. Do NOT search an anime that exists twice in observations.
-        3. Search only ONE concrete anime title.
+        2. Do NOT search again for an anime that already exists in observations.
+            You MUST still evaluate anime already present in observations to determine whether one satisfies the requirements.
+        3. Search only ONE real, existing anime title.
+            The title MUST refer to an actual anime.
+            Do not invent titles or return names of movies, songs, people, bands, or other non-anime entities.
+            If the title contains a minor spelling or grammatical error with less than a 10% difference from a valid anime title, treat it as the intended anime title.
         4. Never output explanations.
         5. Check previous observations first.
         6. Each observation contains is_valid_anime. If is_valid_anime is False, do NOT consider that anime as a final recommendation.
@@ -217,16 +227,16 @@ def animeRecommendationService(req_obj):
                 "iterations": state["iteration"]
             }
         else :
-            return {
-                "success": False,
-                "error": "Failure in Recommending Anime"
-            }
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invalid LLM response: {curr_res}"
+            )
         max_loop_cycles -= 1
 
-    return {
-        "success": False,
-        "error": "Maximum iterations reached"
-    }
+    raise HTTPException(
+        status_code=422,
+        detail="Maximum iterations reached"
+    )
 
 
 
