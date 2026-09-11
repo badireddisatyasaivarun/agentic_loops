@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Find your next anime</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #E9EBE4;
+    --paper-alt: #F6F6F1;
+    --ink: #17170F;
+    --ink-soft: #4A4A3E;
+    --hanko: #B8382A;
+    --hanko-dark: #8E2A20;
+    --indigo: #2B3A5F;
+    --gold: #A9791F;
+    --line: rgba(23, 23, 15, 0.16);
+    --serif: 'Zen Old Mincho', serif;
+    --sans: 'Zen Kaku Gothic New', sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+  }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 20px 80px;
+  }
+
+  a { color: var(--hanko); }
+
+  .frame {
+    width: 100%;
+    max-width: 980px;
+  }
+
+  /* ---------- top mark + service address ---------- */
+
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-bottom: 18px;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .mark {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 0.02em;
+  }
+
+  .mark span { color: var(--hanko); }
+
+  .service-address {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+
+  .service-address input {
+    font-family: var(--sans);
+    font-size: 13px;
+    border: 1px solid var(--line);
+    background: var(--paper-alt);
+    color: var(--ink);
+    padding: 5px 8px;
+    width: 210px;
+  }
+
+  .service-address input:focus-visible {
+    outline: 2px solid var(--hanko);
+    outline-offset: 1px;
+  }
+
+  /* ---------- hero ---------- */
+
+  .hero {
+    position: relative;
+    padding: 46px 0 40px;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: "";
+    position: absolute;
+    top: -20px;
+    right: -40px;
+    width: 260px;
+    height: 260px;
+    background-image: radial-gradient(var(--ink) 1.4px, transparent 1.4px);
+    background-size: 12px 12px;
+    opacity: 0.14;
+    pointer-events: none;
+  }
+
+  .hero h1 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: clamp(32px, 5vw, 52px);
+    line-height: 1.15;
+    margin: 0 0 14px;
+    max-width: 14ch;
+  }
+
+  .hero p {
+    font-size: 16px;
+    color: var(--ink-soft);
+    max-width: 46ch;
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  /* ---------- layout: form + result panels ---------- */
+
+  .panels {
+    display: grid;
+    grid-template-columns: 0.85fr 1.15fr;
+    border: 2px solid var(--ink);
+  }
+
+  @media (max-width: 720px) {
+    .panels { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    padding: 30px;
+  }
+
+  .panel-form {
+    background: var(--paper);
+    border-right: 2px solid var(--ink);
+  }
+
+  @media (max-width: 720px) {
+    .panel-form { border-right: none; border-bottom: 2px solid var(--ink); }
+  }
+
+  .panel-result {
+    background: var(--paper-alt);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  .field { margin-bottom: 24px; }
+
+  .field label {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .field .hint {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    font-family: var(--sans);
+    font-size: 15px;
+    background: var(--paper-alt);
+    border: 1.5px solid var(--ink);
+    padding: 10px 12px;
+    color: var(--ink);
+  }
+
+  input[type="text"]:focus-visible {
+    outline: 2px solid var(--hanko);
+    outline-offset: 1px;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .chip {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    padding: 7px 13px;
+    border: 1.5px solid var(--ink);
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  .chip:hover { background: rgba(23, 23, 15, 0.06); }
+
+  .chip.selected {
+    background: var(--indigo);
+    border-color: var(--indigo);
+    color: var(--paper-alt);
+  }
+
+  .chip:focus-visible { outline: 2px solid var(--hanko); outline-offset: 2px; }
+
+  .rating-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  input[type="range"] {
+    flex: 1;
+    accent-color: var(--hanko);
+  }
+
+  .rating-value {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--gold);
+    min-width: 3ch;
+    text-align: right;
+  }
+
+  .submit-btn {
+    width: 100%;
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 15px;
+    padding: 14px 18px;
+    background: var(--hanko);
+    color: var(--paper-alt);
+    border: 1.5px solid var(--hanko);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .submit-btn:hover:not(:disabled) { background: var(--hanko-dark); }
+
+  .submit-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  .submit-btn:disabled {
+    background: var(--ink-soft);
+    border-color: var(--ink-soft);
+    cursor: default;
+  }
+
+  .error-msg {
+    margin-top: 14px;
+    font-size: 13.5px;
+    color: var(--hanko-dark);
+    line-height: 1.5;
+  }
+
+  /* ---------- result panel states ---------- */
+
+  .result-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+  }
+
+  .result-body.has-result {
+    justify-content: flex-start;
+  }
+
+  .placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    color: var(--ink-soft);
+    gap: 18px;
+  }
+
+  .placeholder svg { width: 84px; height: 84px; opacity: 0.55; }
+
+  .placeholder p {
+    font-size: 14px;
+    max-width: 30ch;
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  .scanline {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--hanko);
+    top: 0;
+    opacity: 0;
+  }
+
+  .scanline.active {
+    opacity: 1;
+    animation: sweep 1.4s ease-in-out infinite;
+  }
+
+  @keyframes sweep {
+    0% { top: 4%; }
+    50% { top: 92%; }
+    100% { top: 4%; }
+  }
+
+  .loading-label {
+    text-align: center;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin-top: 14px;
+  }
+
+  .result-card {
+    animation: reveal 0.5s ease both;
+    display: flex;
+    gap: 22px;
+    align-items: flex-start;
+  }
+
+  @media (max-width: 480px) {
+    .result-card { flex-direction: column; }
+  }
+
+  @keyframes reveal {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .result-poster {
+    width: 128px;
+    height: 182px;
+    object-fit: cover;
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    flex-shrink: 0;
+  }
+
+  .result-poster-empty {
+    width: 128px;
+    height: 182px;
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-soft);
+    flex-shrink: 0;
+  }
+
+  .result-poster-empty svg { width: 40px; height: 40px; opacity: 0.5; }
+
+  .result-content { flex: 1; min-width: 0; }
+
+  .result-eyebrow {
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-bottom: 10px;
+  }
+
+  .result-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .result-title {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 26px;
+    line-height: 1.2;
+    margin: 0;
+  }
+
+  .result-rating {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 17px;
+    color: var(--gold);
+    white-space: nowrap;
+  }
+
+  .result-genres {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 12px 0 14px;
+  }
+
+  .genre-tag {
+    font-size: 12px;
+    border: 1px solid var(--indigo);
+    color: var(--indigo);
+    padding: 3px 10px;
+  }
+
+  .result-description {
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: var(--ink-soft);
+    max-height: 190px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .result-meta {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin-top: 14px;
+  }
+
+  .result-error {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border: 1.5px solid var(--hanko);
+    background: rgba(184, 56, 42, 0.07);
+    padding: 20px;
+    animation: reveal 0.35s ease both;
+  }
+
+  .result-error-title {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--hanko-dark);
+  }
+
+  .result-error-message {
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--hanko-dark);
+  }
+
+  .try-again {
+    margin-top: 22px;
+    background: none;
+    border: none;
+    border-bottom: 1.5px solid var(--ink);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    padding: 0 0 2px;
+    cursor: pointer;
+    width: fit-content;
+  }
+
+  .try-again:focus-visible { outline: 2px solid var(--hanko); outline-offset: 2px; }
+
+  footer {
+    max-width: 980px;
+    width: 100%;
+    margin-top: 22px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    text-align: center;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scanline.active { animation: none; opacity: 0.6; }
+    .result-card { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="topbar">
+    <div class="mark">recommend<span>.</span>anime</div>
+    <div class="service-address">
+      <label for="apiBase">Service address</label>
+      <input id="apiBase" type="text" value="http://localhost:8000" spellcheck="false">
+    </div>
+  </div>
+
+  <div class="hero">
+    <h1>Tell us what you already loved.</h1>
+    <p>Name one anime, pick the genres you're in the mood for, and set a rating floor. The agent searches real anime data until it finds a genuine match.</p>
+  </div>
+
+  <div class="panels">
+    <div class="panel panel-form">
+      <form id="recForm">
+        <div class="field">
+          <label for="similarTo">Similar to</label>
+          <input type="text" id="similarTo" placeholder="e.g. Death Note" required>
+        </div>
+
+        <div class="field">
+          <label id="genreLabel">Genres</label>
+          <div class="chips" id="genreChips" role="group" aria-labelledby="genreLabel"></div>
+          <p class="hint">Pick at least one. Selecting several widens the search.</p>
+        </div>
+
+        <div class="field">
+          <label for="minRating">Minimum rating</label>
+          <div class="rating-row">
+            <input type="range" id="minRating" min="0" max="10" step="0.5" value="7">
+            <span class="rating-value" id="ratingValue">7.0</span>
+          </div>
+        </div>
+
+        <button type="submit" class="submit-btn" id="submitBtn">Find my anime</button>
+        <div class="error-msg" id="errorMsg" role="alert" hidden></div>
+      </form>
+    </div>
+
+    <div class="panel panel-result">
+      <div class="scanline" id="scanline"></div>
+      <div class="result-body" id="resultBody">
+        <div class="placeholder" id="placeholder">
+          <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="18" y="12" width="64" height="76" stroke="currentColor" stroke-width="2.4"/>
+            <line x1="18" y1="30" x2="82" y2="30" stroke="currentColor" stroke-width="2.4"/>
+            <line x1="30" y1="46" x2="70" y2="46" stroke="currentColor" stroke-width="2"/>
+            <line x1="30" y1="58" x2="70" y2="58" stroke="currentColor" stroke-width="2"/>
+            <line x1="30" y1="70" x2="54" y2="70" stroke="currentColor" stroke-width="2"/>
+          </svg>
+          <p>Your recommendation appears here once the search finishes.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    ©Satya Sai Varun badireddi
+  </footer>
+
+</div>
+
+<script>
+  const GENRES = [
+    "Action", "Adventure", "Comedy", "Drama", "Fantasy",
+    "Horror", "Mystery", "Romance", "Sci-Fi", "Slice of Life",
+    "Sports", "Supernatural", "Thriller"
+  ];
+
+  const genreChipsEl = document.getElementById('genreChips');
+  const selectedGenres = new Set();
+
+  GENRES.forEach(genre => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chip';
+    btn.textContent = genre;
+    btn.setAttribute('aria-pressed', 'false');
+    btn.addEventListener('click', () => {
+      if (selectedGenres.has(genre)) {
+        selectedGenres.delete(genre);
+        btn.classList.remove('selected');
+        btn.setAttribute('aria-pressed', 'false');
+      } else {
+        selectedGenres.add(genre);
+        btn.classList.add('selected');
+        btn.setAttribute('aria-pressed', 'true');
+      }
+    });
+    genreChipsEl.appendChild(btn);
+  });
+
+  const minRating = document.getElementById('minRating');
+  const ratingValue = document.getElementById('ratingValue');
+  minRating.addEventListener('input', () => {
+    ratingValue.textContent = parseFloat(minRating.value).toFixed(1);
+  });
+
+  const form = document.getElementById('recForm');
+  const submitBtn = document.getElementById('submitBtn');
+  const errorMsg = document.getElementById('errorMsg');
+  const resultBody = document.getElementById('resultBody');
+  const scanline = document.getElementById('scanline');
+  const apiBaseInput = document.getElementById('apiBase');
+
+  function showError(message) {
+    errorMsg.textContent = message;
+    errorMsg.hidden = false;
+  }
+
+  function clearError() {
+    errorMsg.hidden = true;
+    errorMsg.textContent = '';
+  }
+
+  function renderPlaceholder() {
+    resultBody.classList.remove('has-result');
+    resultBody.innerHTML = `
+      <div class="placeholder" id="placeholder">
+        <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="18" y="12" width="64" height="76" stroke="currentColor" stroke-width="2.4"/>
+          <line x1="18" y1="30" x2="82" y2="30" stroke="currentColor" stroke-width="2.4"/>
+          <line x1="30" y1="46" x2="70" y2="46" stroke="currentColor" stroke-width="2"/>
+          <line x1="30" y1="58" x2="70" y2="58" stroke="currentColor" stroke-width="2"/>
+          <line x1="30" y1="70" x2="54" y2="70" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <p>Your recommendation appears here once the search finishes.</p>
+      </div>
+    `;
+  }
+
+  function renderResultError(message) {
+    resultBody.classList.add('has-result');
+    resultBody.innerHTML = `
+      <div class="result-error">
+        <div class="result-error-title">Search failed</div>
+        <div class="result-error-message">${escapeHtml(message)}</div>
+        <button type="button" class="try-again" id="tryAgainBtn">Try again</button>
+      </div>
+    `;
+    document.getElementById('tryAgainBtn').addEventListener('click', () => {
+      renderPlaceholder();
+    });
+  }
+
+  function renderResult(data, similarTo) {
+    const { anime, iterations, image, description, genre, rating } = data;
+
+    const posterMarkup = image
+      ? `<img class="result-poster" src="${escapeHtml(image)}" alt="Cover art for ${escapeHtml(anime)}">`
+      : `<div class="result-poster-empty">
+           <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+             <rect x="18" y="12" width="64" height="76" stroke="currentColor" stroke-width="2.4"/>
+             <line x1="18" y1="30" x2="82" y2="30" stroke="currentColor" stroke-width="2.4"/>
+           </svg>
+         </div>`;
+
+    const ratingMarkup = (typeof rating === 'number')
+      ? `<span class="result-rating">★ ${rating.toFixed(1)}</span>`
+      : '';
+
+    const genreList = Array.isArray(genre) ? genre : [];
+    const genresMarkup = genreList.length
+      ? `<div class="result-genres">${genreList.map(g => `<span class="genre-tag">${escapeHtml(g)}</span>`).join('')}</div>`
+      : '';
+
+    const descriptionMarkup = description
+      ? `<div class="result-description">${escapeHtml(description).replace(/\n+/g, '<br><br>')}</div>`
+      : `<div class="result-description">No description available.</div>`;
+
+    resultBody.classList.add('has-result');
+    resultBody.innerHTML = `
+      <div class="result-card">
+        ${posterMarkup}
+        <div class="result-content">
+          <div class="result-eyebrow">Because you liked ${escapeHtml(similarTo)}</div>
+          <div class="result-title-row">
+            <h2 class="result-title">${escapeHtml(anime)}</h2>
+            ${ratingMarkup}
+          </div>
+          ${genresMarkup}
+          ${descriptionMarkup}
+          <div class="result-meta">Found in ${iterations} search step${iterations === 1 ? '' : 's'}.</div>
+          <button type="button" class="try-again" id="tryAgainBtn">Search again</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('tryAgainBtn').addEventListener('click', () => {
+      renderPlaceholder();
+    });
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function setLoading(isLoading) {
+    submitBtn.disabled = isLoading;
+    submitBtn.textContent = isLoading ? 'Searching…' : 'Find my anime';
+    scanline.classList.toggle('active', isLoading);
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearError();
+
+    const similarTo = document.getElementById('similarTo').value.trim();
+    if (!similarTo) {
+      showError('Enter an anime title to base the recommendation on.');
+      return;
+    }
+    if (selectedGenres.size === 0) {
+      showError('Pick at least one genre.');
+      return;
+    }
+
+    const base = apiBaseInput.value.trim().replace(/\/$/, '');
+    if (!base) {
+      showError('Enter the service address for your recommendation API.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${base}/recommend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          anime_similar_to: similarTo,
+          genre_preferred: Array.from(selectedGenres),
+          min_rating: parseFloat(minRating.value)
+        })
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const detail = (data && data.detail) ? data.detail : `Request failed with status ${response.status}.`;
+        renderResultError(detail);
+        return;
+      }
+
+      if (!data || !data.anime) {
+        renderResultError('The service responded without a recommendation. Try again.');
+        return;
+      }
+
+      renderResult(data, similarTo);
+
+    } catch (err) {
+      renderResultError(`Can't reach the service at ${base}. Check the address, that the server is running, and that it allows requests from this page (CORS).`);
+    } finally {
+      setLoading(false);
+    }
+  });
+</script>
+
+</body>
+</html>
