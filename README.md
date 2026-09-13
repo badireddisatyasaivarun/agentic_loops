@@ -20,3 +20,5 @@ uvicorn main:app --reload
 
 
 # Futher we will modify this existing feature to support both anime and manga incorportaing agentic graphs
+
+pip install langgraph

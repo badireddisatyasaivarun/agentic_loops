@@ -1,6 +1,8 @@
 import logging
 import os
-from typing import Optional
+from typing import Optional, TypedDict, Literal
+
+from langgraph.graph import StateGraph, START, END
 
 import requests
 from fastapi import FastAPI, HTTPException
@@ -22,7 +24,7 @@ app.add_middleware(
 )
 
 MAX_LOOP_CYCLES = 5
-KITSU_URL = "https://kitsu.io/api/edge/anime"
+KITSU_BASE_URL = "https://kitsu.io/api/edge"
 GROQ_MODEL = "openai/gpt-oss-120b"
 
 # ---------------------------------------------------------------------------
@@ -54,16 +56,17 @@ _http_session = requests.Session()
 # Kitsu API
 # ---------------------------------------------------------------------------
 
-def live_anime_data(anime_title: str) -> Optional[dict]:
-    """Look up an anime on Kitsu and return a normalized dict, or None on
+def live_content_data(title: str, content_type: str) -> Optional[dict]:
+    """Look up an anime / manga on Kitsu and return a normalized dict, or None on
     any failure (not found, network error, malformed response)."""
+    url = f"{KITSU_BASE_URL}/{content_type}"
     params = {
-        "filter[text]": anime_title,
+        "filter[text]": title,
         "include": "categories",
         "page[limit]": 1,
     }
     try:
-        response = _http_session.get(KITSU_URL, params=params, timeout=10)
+        response = _http_session.get(url, params=params, timeout=10)
         response.raise_for_status()
         result = response.json()
 
@@ -71,8 +74,8 @@ def live_anime_data(anime_title: str) -> Optional[dict]:
         if not data:
             return None
 
-        anime = data[0]
-        attributes = anime.get("attributes", {})
+        content = data[0]
+        attributes = content.get("attributes", {})
 
         category_map = {
             category["id"]: category.get("attributes", {}).get("title")
@@ -80,19 +83,21 @@ def live_anime_data(anime_title: str) -> Optional[dict]:
             if category.get("type") == "categories" and category.get("id")
         }
 
-        genre_refs = (
-            anime.get("relationships", {})
+        category_refs = (
+            content.get("relationships", {})
             .get("categories", {})
             .get("data", [])
         )
         genres = [
             category_map[ref["id"]]
-            for ref in genre_refs
-            if ref.get("id") in category_map and category_map[ref["id"]]
+            for ref in category_refs
+            if ref.get("id") in category_map
         ]
 
         rating = attributes.get("averageRating")
+
         rating = float(rating) / 10 if rating is not None else None
+        
 
         poster_image = attributes.get("posterImage") or {}
         image_url = (
@@ -105,18 +110,21 @@ def live_anime_data(anime_title: str) -> Optional[dict]:
         return {
             "title": attributes.get("canonicalTitle"),
             "genre": genres,
-            "episodes": attributes.get("episodeCount"),
+            "episodes": attributes.get("episodeCount") if content_type == "anime" else None,
+            "chapters": attributes.get("chapterCount") if content_type == "manga" else None,
+            "volumes": attributes.get("volumeCount") if content_type == "manga" else None,
             "rating": rating,
             "synopsis": attributes.get("synopsis"),
             "status": attributes.get("status"),
             "image": image_url,
+            "type": content_type,
         }
 
     except requests.RequestException as error:
-        logger.warning("Kitsu API error for %r: %s", anime_title, error)
+        logger.warning("Kitsu API error for %r: %s", title, error)
         return None
     except (KeyError, ValueError, TypeError) as error:
-        logger.warning("Kitsu response parsing error for %r: %s", anime_title, error)
+        logger.warning("Kitsu response parsing error for %r: %s", title, error)
         return None
 
 
