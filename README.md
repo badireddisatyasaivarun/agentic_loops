@@ -17,3 +17,6 @@ uvicorn main:app --reload
 
 
 # Define GROQ_API_KEY in the .env
+
+
+# Futher we will modify this existing feature to support both anime and manga incorportaing agentic graphs
