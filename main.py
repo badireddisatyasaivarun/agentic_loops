@@ -127,6 +127,28 @@ def live_content_data(title: str, content_type: str) -> Optional[dict]:
         logger.warning("Kitsu response parsing error for %r: %s", title, error)
         return None
 
+# ---------------------------------------------------------------------------
+# Sample Data Watched Anime / Manga
+# ---------------------------------------------------------------------------
+
+SAMPLE_WATCHED_ANIME = [
+    "Death Note",
+    "Attack on Titan",
+    "Demon Slayer",
+    "Jujutsu Kaisen",
+    "Naruto",
+    "Monster",
+    "Code Geass",
+]
+
+SAMPLE_READ_MANGA = [
+    "Berserk",
+    "Vagabond",
+    "Chainsaw Man",
+    "Tokyo Ghoul",
+    "One Punch Man",
+]
+
 
 # ---------------------------------------------------------------------------
 # LLM call
@@ -155,6 +177,7 @@ def ask_llm(prompt: str) -> Optional[str]:
 
 class RecommendationRequest(BaseModel):
     anime_similar_to: str = Field(..., min_length=1)
+    content_type: Literal["anime", "manga"]
     genre_preferred: list[str] = Field(..., min_length=1)
     min_rating: float = Field(..., ge=0, le=10)
     exclude_titles: list[str] = Field(default_factory=list)
@@ -183,179 +206,328 @@ class RecommendationRequest(BaseModel):
 
 class RecommendationResponse(BaseModel):
     success: bool
-    anime: str
+    title: str
+    content_type: str
     iterations: int
     image: Optional[str] = None
     description: Optional[str] = None
     genre: list[str] = Field(default_factory=list)
     rating: Optional[float] = None
+    episodes: Optional[int] = None
+    chapters: Optional[int] = None
+    volumes: Optional[int] = None
 
 
-def _format_observations(observations: list[dict]) -> str:
-    """Render observations as compact, readable text instead of a raw dict
-    repr, so the LLM gets clean signal without wasted tokens."""
-    if not observations:
-        return "(none yet)"
-    lines = []
-    for i, obs in enumerate(observations, 1):
-        result = obs["tool_result"]
-        if result is None:
-            lines.append(f"{i}. {obs['llm_observation']} -> no data found")
-        else:
-            lines.append(
-                f"{i}. title={result.get('title')!r}, "
-                f"genre={result.get('genre')}, "
-                f"rating={result.get('rating')}, "
-                f"is_valid_anime={obs['is_valid_anime']}"
+
+class RecommendationState(TypedDict):
+    anime_similar_to: str
+    content_type: str
+    genre_preferred: list[str]
+    min_rating: float
+    exclude_titles: list[str]
+    watched_anime: list[str]
+    read_manga: list[str]
+    rejected_titles: list[str]
+    recommendation: Optional[str]
+    recommendation_data: Optional[dict]
+    valid: bool
+    already_consumed: bool
+    attempts: int
+
+
+
+def anime_agent(state: RecommendationState):
+    prompt = f"""
+You are an anime recommendation agent.
+
+Recommend ONE anime similar to:
+{state["anime_similar_to"]}
+
+Preferred genres:
+{state["genre_preferred"]}
+
+Minimum rating:
+{state["min_rating"]}
+
+Do NOT recommend:
+{state["rejected_titles"]}
+
+Recommend one real existing anime.
+
+Return ONLY the anime title.
+"""
+    title = ask_llm(prompt)
+    if not title:
+        return {
+            "recommendation": None,
+            "recommendation_data": None,
+            "attempts": state["attempts"] + 1,
+        }
+    title = title.strip()
+    data = live_content_data(title,"anime")
+    return {
+        "recommendation": title,
+        "recommendation_data": data,
+        "attempts": state["attempts"] + 1,
+    }
+
+
+def manga_agent(state: RecommendationState):
+    prompt = f"""
+You are a manga recommendation agent.
+
+Recommend ONE manga similar to:
+{state["anime_similar_to"]}
+
+Preferred genres:
+{state["genre_preferred"]}
+
+Minimum rating:
+{state["min_rating"]}
+
+Do NOT recommend:
+{state["rejected_titles"]}
+
+Recommend one real existing manga.
+
+Return ONLY the manga title.
+"""
+
+    title = ask_llm(prompt)
+    if not title:
+        return {
+            "recommendation": None,
+            "recommendation_data": None,
+            "attempts": state["attempts"] + 1,
+        }
+    title = title.strip()
+    data = live_content_data(title, "manga")
+    return {
+        "recommendation": title,
+        "recommendation_data": data,
+        "attempts": state["attempts"] + 1,
+    }
+
+
+def validate_recommendation(state: RecommendationState):
+    data = state["recommendation_data"]
+    if not data:
+        recommendation = state["recommendation"]
+        rejected = state["rejected_titles"]
+        if recommendation:
+            rejected = [
+                *rejected,
+                recommendation
+            ]
+        return {
+            "valid": False,
+            "rejected_titles": rejected
+        }
+    rating = data.get("rating")
+    if (rating is None or rating < state["min_rating"]):
+        return {
+            "valid": False,
+            "rejected_titles": [
+                *state["rejected_titles"],
+                data["title"]
+            ]
+        }
+    preferred_genres = {
+        genre.lower()
+        for genre in state["genre_preferred"]
+    }
+    actual_genres = {
+        genre.lower()
+        for genre in data.get("genre", [])
+    }
+
+    if ( preferred_genres and not preferred_genres.intersection( actual_genres )):
+        return {
+            "valid": False,
+            "rejected_titles": [
+                *state["rejected_titles"],
+                data["title"]
+            ]
+        }
+
+    return {
+        "valid": True
+    }
+
+def check_history( state: RecommendationState ):
+    data = state[
+        "recommendation_data"
+    ]
+
+    if not data:
+        return {
+            "already_consumed": False
+        }
+    
+    title = data["title"].strip().lower()
+
+    if state["content_type"] == "anime":
+        history = {
+            item.strip().lower()
+            for item
+            in state["watched_anime"]
+        }
+    else:
+        history = {
+            item.strip().lower()
+            for item
+            in state["read_manga"]
+        }
+
+    if title in history:
+        return {
+            "already_consumed": True,
+            "rejected_titles": [
+                *state["rejected_titles"],
+                data["title"]
+            ]
+        }
+
+    return {
+        "already_consumed":
+            False
+    }
+
+
+def route_content(state: RecommendationState):
+    return state["content_type"]
+
+
+def route_validation( state: RecommendationState ):
+    if state["attempts"] >= MAX_LOOP_CYCLES:
+        return "end"
+    if state["valid"]:
+        return "check_history"
+    return "retry"
+
+def route_history(state: RecommendationState):
+    if state["attempts"] >= MAX_LOOP_CYCLES:
+        return "end"
+    if state["already_consumed"]:
+        return "retry"
+    return "end"
+
+def retry_node(state: RecommendationState):
+    return {}
+
+
+def retry_route(state: RecommendationState):
+    return state["content_type"]
+
+
+# define nodes
+graph = StateGraph(RecommendationState)
+
+graph.add_node("anime_agent", anime_agent )
+graph.add_node("manga_agent", manga_agent )
+graph.add_node("validate", validate_recommendation )
+graph.add_node("check_history", check_history )
+graph.add_node("retry", retry_node )
+
+
+
+# Routing
+graph.add_conditional_edges(
+    START,
+    route_content,
+    {
+        "anime":
+            "anime_agent",
+        "manga":
+            "manga_agent",
+    }
+)
+
+
+graph.add_edge("anime_agent", "validate" )
+graph.add_edge("manga_agent", "validate" )
+graph.add_conditional_edges(
+    "validate",
+    route_validation,
+    {
+        "check_history":
+            "check_history",
+        "retry":
+            "retry",
+        "end":
+            END,
+    }
+)
+
+graph.add_conditional_edges(
+    "check_history",
+    route_history,
+    {
+        "retry":
+            "retry",
+        "end":
+            END,
+    }
+)
+
+
+graph.add_conditional_edges(
+    "retry",
+    retry_route,
+    {
+        "anime":
+            "anime_agent",
+        "manga":
+            "manga_agent",
+    }
+)
+
+recommendation_graph = graph.compile()
+
+def anime_recommendation_service( req: RecommendationRequest ) -> RecommendationResponse:
+    initial_state: RecommendationState = {
+        "anime_similar_to": req.anime_similar_to,
+        "content_type": req.content_type,
+        "genre_preferred": req.genre_preferred,
+        "min_rating": req.min_rating,
+        "exclude_titles": req.exclude_titles,
+        "watched_anime": SAMPLE_WATCHED_ANIME,
+        "read_manga": SAMPLE_READ_MANGA,
+        "rejected_titles": [
+            req.anime_similar_to,
+            *req.exclude_titles,
+        ],
+        "recommendation": None,
+        "recommendation_data": None,
+        "valid": False,
+        "already_consumed": False,
+        "attempts": 0,
+    }
+
+    result = recommendation_graph.invoke( initial_state )
+    data = result.get( "recommendation_data" )
+    if (not data or not result["valid"] or result["already_consumed"]):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Maximum iterations reached "
+                "without a recommendation"
             )
-    return "\n".join(lines)
+        )
 
-
-def _build_prompt(user_request: str, observations: list[dict], excluded_titles: list[str]) -> str:
-    excluded_str = ", ".join(excluded_titles) if excluded_titles else "(none)"
-    return f"""You are an anime recommendation agent.
-
-    User request:
-    {user_request}
-
-    Already-recommended anime to avoid (never finish on these, never treat them as valid):
-    {excluded_str}
-
-    Observations so far:
-    {_format_observations(observations)}
-
-    Rules:
-    1. Do NOT recommend the anime mentioned in the user request or any title in the
-    already-recommended list above.
-    2. Do NOT search again for a title that already appears in observations.
-    Still evaluate anime already in observations to see if one satisfies the requirements.
-    3. Search only ONE real, existing anime title per turn.
-    The title MUST refer to an actual anime, not a movie, song, person, or band.
-    Do not invent titles. Minor spelling/grammar errors under ~10% difference
-    from a valid title should be treated as that title.
-    4. Never output explanations.
-    5. An observation's is_valid_anime being False means it can never be a final recommendation.
-    6. Two anime are considered similar if similarity > 70%, weighted:
-    genre 40%, story/synopsis 60%.
-    7. If an observation has is_valid_anime True AND similarity > 70%, return exactly:
-    FINISH: <anime title>
-    8. Otherwise return exactly:
-    SEARCH: <anime title>
-
-    Output exactly one line, either SEARCH: ... or FINISH: ..., nothing else.
-    """
-
-
-def _validate_finish(anime_title: str, observations: list[dict]) -> Optional[dict]:
-    """Guard against the LLM hallucinating a FINISH for a title that was
-    never actually validated against Kitsu data."""
-    target = anime_title.strip().lower()
-    for obs in observations:
-        result = obs.get("tool_result")
-        if (
-            obs.get("is_valid_anime")
-            and result
-            and (result.get("title") or "").strip().lower() == target
-        ):
-            return result
-    return None
-
-
-def anime_recommendation_service(req: RecommendationRequest) -> RecommendationResponse:
-    genre_preferred_str = ", ".join(req.genre_preferred)
-    preferred_genres = {g.lower() for g in req.genre_preferred}
-
-    excluded_titles = [req.anime_similar_to, *req.exclude_titles]
-    excluded_normalized = {t.lower() for t in excluded_titles}
-
-    user_request = (
-        f"I want a single anime similar to {req.anime_similar_to}, "
-        f"I prefer {genre_preferred_str} oriented, with rating over {req.min_rating}"
+    return RecommendationResponse(
+        success =True,
+        title = data["title"],
+        content_type = result["content_type"],
+        iterations = result["attempts"],
+        image = data.get("image"),
+        description = data.get("synopsis"),
+        genre = data.get("genre") or [],
+        rating = data.get("rating"),
+        episodes = data.get("episodes"),
+        chapters = data.get("chapters"),
+        volumes = data.get("volumes"),
     )
-    observations: list[dict] = []
-    searched_titles: dict[str, dict] = {}  # normalized title -> observation
-
-    for iteration in range(1, MAX_LOOP_CYCLES + 1):
-        prompt = _build_prompt(user_request, observations, excluded_titles)
-        raw_response = ask_llm(prompt)
-
-        if raw_response is None:
-            raise HTTPException(
-                status_code=502,
-                detail="The recommendation model is currently unavailable. Please try again.",
-            )
-
-        curr_res = raw_response.strip()
-
-        if curr_res.startswith("FINISH:"):
-            anime_title = curr_res.replace("FINISH:", "", 1).strip()
-            matched = _validate_finish(anime_title, observations) if anime_title else None
-            if not matched:
-                logger.warning(
-                    "LLM returned FINISH for an unvalidated title: %r", anime_title
-                )
-                raise HTTPException(
-                    status_code=502,
-                    detail="The model produced a recommendation that could not be verified.",
-                )
-            logger.info("Recommendation found after %d iteration(s): %s", iteration, anime_title)
-            return RecommendationResponse(
-                success=True,
-                anime=matched.get("title") or anime_title,
-                iterations=iteration,
-                image=matched.get("image"),
-                description=matched.get("synopsis"),
-                genre=matched.get("genre") or [],
-                rating=matched.get("rating"),
-            )
-
-        if curr_res.startswith("SEARCH:"):
-            anime_title = curr_res.replace("SEARCH:", "", 1).strip()
-            if not anime_title:
-                raise HTTPException(status_code=502, detail="Invalid empty search title from model")
-
-            normalized = anime_title.lower()
-
-            if normalized in searched_titles:
-                # Enforce the "don't re-search" rule in code rather than trusting the prompt.
-                observations.append(searched_titles[normalized])
-                logger.info("Iteration %d: reused cached search for %r", iteration, anime_title)
-                continue
-
-            curr_anime_data = live_anime_data(anime_title)
-
-            is_atleast_one_genre_match = False
-            if curr_anime_data and curr_anime_data.get("genre"):
-                anime_genres = {g.lower() for g in curr_anime_data["genre"]}
-                is_atleast_one_genre_match = bool(preferred_genres & anime_genres)
-
-            is_excluded = bool(
-                curr_anime_data
-                and (curr_anime_data.get("title") or "").strip().lower() in excluded_normalized
-            )
-
-            is_valid_anime = bool(
-                curr_anime_data
-                and not is_excluded
-                and curr_anime_data.get("rating") is not None
-                and curr_anime_data["rating"] > req.min_rating
-                and is_atleast_one_genre_match
-            )
-
-            observation = {
-                "llm_observation": curr_res,
-                "tool_result": curr_anime_data,
-                "is_valid_anime": is_valid_anime,
-            }
-            observations.append(observation)
-            searched_titles[normalized] = observation
-            logger.info("Iteration %d: searched %r -> valid=%s", iteration, anime_title, is_valid_anime)
-            continue
-
-        raise HTTPException(status_code=502, detail=f"Invalid model response: {curr_res!r}")
-
-    raise HTTPException(status_code=422, detail="Maximum iterations reached without a recommendation")
-
 
 @app.post("/recommend", response_model=RecommendationResponse)
 def recommend(request: RecommendationRequest) -> RecommendationResponse:
