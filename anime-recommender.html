@@ -469,12 +469,17 @@
 
   <div class="hero">
     <h1>Tell us what you already loved.</h1>
-    <p>Name one anime, pick the genres you're in the mood for, and set a rating floor. The agent searches real anime data until it finds a genuine match.</p>
+    <p>Choose anime or manga, name one title, pick the genres you're in the mood for, and set a rating floor. The agent searches real data until it finds a genuine match.</p>
   </div>
 
   <div class="panels">
     <div class="panel panel-form">
       <form id="recForm">
+        <div class="field">
+          <label id="contentTypeLabel">Looking for</label>
+          <div class="chips" id="contentTypeChips" role="group" aria-labelledby="contentTypeLabel"></div>
+        </div>
+
         <div class="field">
           <label for="similarTo">Similar to</label>
           <input type="text" id="similarTo" placeholder="e.g. Death Note" required>
@@ -523,6 +528,33 @@
 </div>
 
 <script>
+  const CONTENT_TYPES = [
+    { value: "anime", label: "Anime" },
+    { value: "manga", label: "Manga" }
+  ];
+
+  const contentTypeChipsEl = document.getElementById('contentTypeChips');
+  let selectedContentType = 'anime';
+
+  function renderContentTypeChips() {
+    contentTypeChipsEl.innerHTML = '';
+    CONTENT_TYPES.forEach(({ value, label }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip';
+      btn.textContent = label;
+      const isSelected = value === selectedContentType;
+      btn.classList.toggle('selected', isSelected);
+      btn.setAttribute('aria-pressed', String(isSelected));
+      btn.addEventListener('click', () => {
+        selectedContentType = value;
+        renderContentTypeChips();
+      });
+      contentTypeChipsEl.appendChild(btn);
+    });
+  }
+  renderContentTypeChips();
+
   const GENRES = [
     "Action", "Adventure", "Comedy", "Drama", "Fantasy",
     "Horror", "Mystery", "Romance", "Sci-Fi", "Slice of Life",
@@ -608,10 +640,10 @@
   }
 
   function renderResult(data, similarTo) {
-    const { anime, iterations, image, description, genre, rating } = data;
+    const { title, content_type, iterations, image, description, genre, rating, episodes, chapters, volumes } = data;
 
     const posterMarkup = image
-      ? `<img class="result-poster" src="${escapeHtml(image)}" alt="Cover art for ${escapeHtml(anime)}">`
+      ? `<img class="result-poster" src="${escapeHtml(image)}" alt="Cover art for ${escapeHtml(title)}">`
       : `<div class="result-poster-empty">
            <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
              <rect x="18" y="12" width="64" height="76" stroke="currentColor" stroke-width="2.4"/>
@@ -632,6 +664,17 @@
       ? `<div class="result-description">${escapeHtml(description).replace(/\n+/g, '<br><br>')}</div>`
       : `<div class="result-description">No description available.</div>`;
 
+    const countParts = [];
+    if (content_type === 'manga') {
+      if (typeof volumes === 'number') countParts.push(`${volumes} volume${volumes === 1 ? '' : 's'}`);
+      if (typeof chapters === 'number') countParts.push(`${chapters} chapter${chapters === 1 ? '' : 's'}`);
+    } else {
+      if (typeof episodes === 'number') countParts.push(`${episodes} episode${episodes === 1 ? '' : 's'}`);
+    }
+    const countMarkup = countParts.length
+      ? `<div class="result-meta">${countParts.join(' · ')}</div>`
+      : '';
+
     resultBody.classList.add('has-result');
     resultBody.innerHTML = `
       <div class="result-card">
@@ -639,11 +682,12 @@
         <div class="result-content">
           <div class="result-eyebrow">Because you liked ${escapeHtml(similarTo)}</div>
           <div class="result-title-row">
-            <h2 class="result-title">${escapeHtml(anime)}</h2>
+            <h2 class="result-title">${escapeHtml(title)}</h2>
             ${ratingMarkup}
           </div>
           ${genresMarkup}
           ${descriptionMarkup}
+          ${countMarkup}
           <div class="result-meta">Found in ${iterations} search step${iterations === 1 ? '' : 's'}.</div>
           <button type="button" class="try-again" id="tryAgainBtn">Search again</button>
         </div>
@@ -671,7 +715,7 @@
   // repeats the same request rather than reading (possibly edited) form fields.
   let lastQuery = null;
 
-  async function performSearch(similarTo, genrePreferred, minRatingVal, excludeTitles) {
+  async function performSearch(contentType, similarTo, genrePreferred, minRatingVal, excludeTitles) {
     const base = API_BASE.replace(/\/$/, '');
     setLoading(true);
 
@@ -680,6 +724,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          content_type: contentType,
           anime_similar_to: similarTo,
           genre_preferred: genrePreferred,
           min_rating: minRatingVal,
@@ -695,13 +740,13 @@
         return;
       }
 
-      if (!data || !data.anime) {
+      if (!data || !data.title) {
         renderResultError('The service responded without a recommendation. Try again.');
         return;
       }
 
       renderResult(data, similarTo);
-      sessionExcludeTitles = [...excludeTitles, data.anime];
+      sessionExcludeTitles = [...excludeTitles, data.title];
 
     } catch (err) {
       renderResultError(`Can't reach the service at ${base}. Check the address, that the server is running, and that it allows requests from this page (CORS).`);
@@ -713,7 +758,7 @@
   function searchAgain() {
     if (!lastQuery) return;
     clearError();
-    performSearch(lastQuery.similarTo, lastQuery.genrePreferred, lastQuery.minRatingVal, sessionExcludeTitles);
+    performSearch(lastQuery.contentType, lastQuery.similarTo, lastQuery.genrePreferred, lastQuery.minRatingVal, sessionExcludeTitles);
   }
 
   form.addEventListener('submit', (event) => {
@@ -732,12 +777,13 @@
 
     const genrePreferred = Array.from(selectedGenres);
     const minRatingVal = parseFloat(minRating.value);
+    const contentType = selectedContentType;
 
     // A fresh top-level search: start the exclude list over.
     sessionExcludeTitles = [];
-    lastQuery = { similarTo, genrePreferred, minRatingVal };
+    lastQuery = { contentType, similarTo, genrePreferred, minRatingVal };
 
-    performSearch(similarTo, genrePreferred, minRatingVal, sessionExcludeTitles);
+    performSearch(contentType, similarTo, genrePreferred, minRatingVal, sessionExcludeTitles);
   });
 </script>
 
